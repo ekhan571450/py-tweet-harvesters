@@ -1,0 +1,11 @@
+To set up the application environment on Ubunutu 14.04 LTS:
+
+$ sh configure
+
+Use all command line arguments to launch the program:
+
+$ python followers.py --id 1 --nodes 1 --couchip IP_GOES_HERE --consumerkey CONSUMER_KEY --consumersecret CONSUMER_SECRET --tokenkey TOKEN_KEY --tokensecret TOKEN_SECRET
+
+Or as a background process (although it would be better to use a progress manager):
+
+$ nohup python followers.py --id 1 --nodes 1 --couchip IP_GOES_HERE --consumerkey CONSUMER_KEY --consumersecret CONSUMER_SECRET --tokenkey TOKEN_KEY --tokensecret TOKEN_SECRET &
