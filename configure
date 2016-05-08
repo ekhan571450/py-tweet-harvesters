@@ -1,4 +1,4 @@
 sudo apt-get update
-sudo apt-get install python-pip
-sudo pip install tweepy
-sudo pip install couchdb
+sudo apt-get install python3-pip
+sudo pip3 install tweepy
+sudo pip3 install couchdb
