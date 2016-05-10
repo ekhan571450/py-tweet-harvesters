@@ -2,18 +2,6 @@
 
 """
 Filename: followers.py
-
-This application harvests tweets.
-
-To configure the environment for this application (with python3 installed):
-$ sudo apt-get update
-$ sudo apt-get install python3-pip
-$ sudo pip3 install tweepy
-$ sudo pip3 install couchdb
-
-Documentation for using tweepy and couchdb libraries:
-- http://tweepy.readthedocs.io/en/v3.5.0/index.html
-- https://pythonhosted.org/CouchDB/
 """
 
 import sys
@@ -28,6 +16,7 @@ import couchdb
   Function Definitions
 """
 
+# This function retrieves a list of unique user IDs from a CouchDB view
 def get_queue ( db_tweets ):
   i = 0
   queue = []
@@ -37,8 +26,10 @@ def get_queue ( db_tweets ):
       i += 1
     return queue
   except:
-    raise Exception('Failed to retrieve user queue')
+    print ('Failed to retrieve view: ' + db_tweets.name + '/app/_view/users_simple\n\n')
+    raise
 
+# This function stores a tweet to a CouchDB database
 def store_tweet ( tweet, database ):
   # Store the serialisable JSON data in a string (tweet is a 'Status' object)
   tweet_str = json.dumps(tweet._json)
@@ -49,13 +40,24 @@ def store_tweet ( tweet, database ):
   # Attempt to save tweet to CouchDB
   try:
     database.save(tweet_doc)
-    print ("Tweet " + tweet.id_str + " stored in the database " + str(database.name))
+    print ("Tweet " + tweet.id_str + " stored in database " + str(database.name))
+  # A ResourceConflict exception is raised if the _id already exists
+  except ResourceConflict:
+    print ("Tweet " + tweet.id_str + " already exists in database " + str(database.name))
+  # A ResourceNotFound exception is raised if the PUT request returns HTTP 404
+  except ResourceNotFound:
+    print ("Tweet " + tweet.id_str + "store attempt failed... trying again in 5 seconds...")
+    # There's no point continuing iterating if tweets aren't being stored, so try again when CouchDB is back
+    time.sleep(5)
+    store_tweet( tweet, database )
+  # If it's an unknown error, continue for now, but warn the user
   except:
-    print ("Tweet " + tweet.id_str + " already exists in the database " + str(database.name))
+    print ("Unexpected error storing tweet " + tweet.id_str + ": " + str(sys.exc_info()[0]))
+    pass
 
-"""
-  Main Program
-"""
+""" --------------------------
+    Main Program
+-------------------------- """
  
 # Create a log file
 #log_file = open("message.log","w")
@@ -63,13 +65,13 @@ def store_tweet ( tweet, database ):
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='')
-parser.add_argument('--id', '-i', type=int, help='The unique node ID: The first node should have an ID of 0')
-parser.add_argument('--nodes', '-n', type=int, help='The total number of harvesting nodes')
-parser.add_argument('--couchip', '-c', help='The IP address of the CouchDB instance')
-parser.add_argument('--consumerkey', '-ck', help='Twitter API Consumer Key')
-parser.add_argument('--consumersecret', '-cs', help='Twitter API Consumer Secret')
-parser.add_argument('--tokenkey', '-tk', help='Twitter Access Token Key')
-parser.add_argument('--tokensecret', '-ts', help='Twitter Access Token Secret')
+parser.add_argument('--id', '-i', type=int, default=0, help='The unique node ID: The first node should have an ID of 0')
+parser.add_argument('--nodes', '-n', type=int, default=1, help='The total number of harvesting nodes')
+parser.add_argument('--couchip', '-c', required=True, help='The IP address of the CouchDB instance')
+parser.add_argument('--consumerkey', '-ck', required=True, help='Twitter API Consumer Key')
+parser.add_argument('--consumersecret', '-cs', required=True, help='Twitter API Consumer Secret')
+parser.add_argument('--tokenkey', '-tk', required=True, help='Twitter Access Token Key')
+parser.add_argument('--tokensecret', '-ts', required=True, help='Twitter Access Token Secret')
 args = parser.parse_args()
 
 # Initialise Twitter communication
@@ -77,9 +79,14 @@ auth = tweepy.OAuthHandler(args.consumerkey, args.consumersecret)
 auth.set_access_token(args.tokenkey, args.tokensecret)
 try:
   api = tweepy.API(auth, wait_on_rate_limit=True, wait_on_rate_limit_notify=True)
-  print ("OAuth connection with Twitter established\n")
+  # tweepy.API constructor does not seem to throw an exception for OAuth failure
+  # Use API.verify_credentials() to validate OAuth instead
+  cred = api.verify_credentials()
+  print ("OAuth connection with Twitter established through user @" + cred.screen_name + "\n")
+except tweepy.TweepError as oauth_error:
+  print ("OAuth connection with Twitter could not be established\n\n")
+  raise oauth_error
 except:
-  print ("OAuth connection with Twitter could not be established\n")
   raise
 
 # Initialise CouchDB communication
@@ -89,23 +96,45 @@ try:
   couch = couchdb.Server('http://' + args.couchip + ':5984/')
   print ("Connected to CouchDB server at http://" + args.couchip + ":5984\n")
 except:
-  print ("Failed to connect to CouchDB server on port 5984 (HTTP)\n")
+  print ("Failed to connect to CouchDB server at http://" + args.couchip + ":5984\n\n")
   raise
 try:
   db_tweets = couch[db_tweets_str]
-  print ("Connected to " + db_tweets_str + " database\n")
+  print ("Connected to " + db_tweets_str + " database")
+# The python-couchdb documentation says that a PreconditionFailed exception is raised when a DB isn't found
+# But in practice it throws a ResourceNotFound exception
+except couchdb.ResourceNotFound:
+  try:
+    db_tweets = couch.create(db_tweets_str)
+    print ("Creating new database: " + db_tweets_str)
+    """
+    Note: This program relies on a view existing in database at /app/_view/users_simple.
+    In the future this program should create this view if a new database is created, but the database
+    needs to have at least one user in it for the view & program to work.
+    """
+  except:
+    raise
 except:
-  db_tweets = couch.create(db_tweets_str)
-  print ("Creating new database: " + db_tweets_str + "\n")
+  raise
 try:
   db_tweets_etc = couch[db_tweets_etc_str]
   print ("Connected to " + db_tweets_etc_str + " database\n")
+# The couchdb documentation says that a PreconditionFailed exception is raised when a DB isn't found
+# But in practice it throws a ResourceNotFound exception
+except couchdb.ResourceNotFound:
+  try:
+    db_tweets_etc = couch.create(db_tweets_etc_str)
+    print ("Creating new database: " + db_tweets_etc_str + "\n")
+  except:
+    raise
 except:
-  db_tweets_etc = couch.create(db_tweets_etc_str)
-  print ("Creating new database: " + db_tweets_etc_str + "\n")
+  raise
 
 # Download list of users from the tweets database
-queue = get_queue(db_tweets)
+try:
+  queue = get_queue(db_tweets)
+except:
+  raise
 queue_len = len(queue)
 
 # While (searching)
@@ -119,7 +148,10 @@ while searching:
   # If the user iterator (j) exceeds a point in the array
   if j > (queue_len - 1):
     # Re-download user queue from tweets database
-    queue = get_queue(db_tweets)
+    try:
+      queue = get_queue(db_tweets)
+    except:
+      raise
     # If the queue has now extended
     if (j <= (len(queue) - 1)):
       # Save a new queue length and continue
@@ -140,9 +172,9 @@ while searching:
           store_tweet(tweet, db_tweets_etc)
       except:
         store_tweet(tweet, db_tweets_etc)
-        #pass
     print ("Retrieving tweets for user ID " + str(queue[j]))
-  except:
+  # We don't need to handle for RateLimitError because the Cursor automatically waits on
+  except tweepy.TweepError:
     print ("Failed to retrieve tweets for user ID " + str(queue[j]))
 
   # Download the followers of the user
@@ -162,10 +194,12 @@ while searching:
           except:
             store_tweet(tweet, db_tweets_etc)
             #pass
-      except:
+      # We don't need to handle for RateLimitError because the Cursor automatically waits on
+      except tweepy.TweepError:
         print ("Failed to retrieve tweets for follower " + follower.id_str)
-
-  except:
+  
+  # We don't need to handle for RateLimitError because the Cursor automatically waits on
+  except tweepy.TweepError:
     print ("Failed to retrieve followers for user ID " + str(queue[j]))
 
 # Close the log file
