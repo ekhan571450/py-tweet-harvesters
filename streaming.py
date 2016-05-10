@@ -24,6 +24,8 @@ def store_tweet ( tweet, database ):
   tweet_doc = json.loads(tweet_str)
   # Store the unique tweet ID as the document _id for CouchDB
   tweet_doc.update({'_id': tweet.id_str})
+  # Store the API source as well
+  tweet_doc.update({'source': 'stream'})
   # Attempt to save tweet to CouchDB
   try:
     database.save(tweet_doc)

@@ -21,12 +21,12 @@ def get_queue ( db_tweets ):
   i = 0
   queue = []
   try:
-    for row in db_tweets.view('app/users_simple', wrapper=None, group='true'):
-      queue.append(row.key)
+    for row in db_tweets.view('app/users', wrapper=None, group='true'):
+      queue.append([row.key, row.value])
       i += 1
     return queue
   except:
-    print ('Failed to retrieve view: ' + db_tweets.name + '/app/_view/users_simple\n\n')
+    print ('Failed to retrieve view: ' + db_tweets.name + '/app/_view/users\n\n')
     raise
 
 # This function stores a tweet to a CouchDB database
@@ -37,6 +37,8 @@ def store_tweet ( tweet, database ):
   tweet_doc = json.loads(tweet_str)
   # Store the unique tweet ID as the document _id for CouchDB
   tweet_doc.update({'_id': tweet.id_str})
+  # Store the API source in the document as well
+  tweet_doc.update({'source': 'search'})
   # Attempt to save tweet to CouchDB
   try:
     database.save(tweet_doc)
@@ -162,7 +164,7 @@ while searching:
 
   # Download the timeline of the user
   try:
-    for tweet in tweepy.Cursor(api.user_timeline, id=queue[j]).items():
+    for tweet in tweepy.Cursor(api.user_timeline, id=queue[j][0], since_id=queue[j][1]).items():
       # Try access place.name (may not exist and will throw an exception)
       try:
         city = tweet.place.name
@@ -172,15 +174,15 @@ while searching:
           store_tweet(tweet, db_tweets_etc)
       except:
         store_tweet(tweet, db_tweets_etc)
-    print ("Retrieving tweets for user ID " + str(queue[j]))
+    print ("Retrieving tweets for user ID " + str(queue[j][0]))
   # We don't need to handle for RateLimitError because the Cursor automatically waits on
   except tweepy.TweepError:
-    print ("Failed to retrieve tweets for user ID " + str(queue[j]))
+    print ("Failed to retrieve tweets for user ID " + str(queue[j][0]))
 
   # Download the followers of the user
   try:
-    for follower in tweepy.Cursor(api.followers, id=queue[j]).items():
-      print ("Retrieving tweets for follower " + str(queue[j]))
+    for follower in tweepy.Cursor(api.followers, id=queue[j][0]).items():
+      print ("Retrieving tweets for follower " + str(queue[j][0]))
       # Download the timeline of the follower
       try:
         for tweet in tweepy.Cursor(api.user_timeline, id=follower.id_str).items():
@@ -200,7 +202,7 @@ while searching:
   
   # We don't need to handle for RateLimitError because the Cursor automatically waits on
   except tweepy.TweepError:
-    print ("Failed to retrieve followers for user ID " + str(queue[j]))
+    print ("Failed to retrieve followers for user ID " + str(queue[j][0]))
 
 # Close the log file
 #log_file.close()
